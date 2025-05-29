@@ -3,7 +3,7 @@ from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import sessionmaker
 import logging
 
-DATABASE_URL = 'postgresql+psycopg2://user:password@pgsql:5432/photodatabase'
+DATABASE_URL = 'postgresql+psycopg2://user:password@pgsql_photos:5432/photodatabase'
 
 logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
 engine = create_engine(DATABASE_URL)

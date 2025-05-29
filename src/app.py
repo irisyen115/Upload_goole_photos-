@@ -1,10 +1,12 @@
+from flask import Flask, request, jsonify
 from lib.synlogy import (
-    login, download_photo
+    login, download_photo, list_people
 )
 from lib.google import (
     authenticate, get_service, get_or_create_album,
-    upload_photo_bytes, add_photos_to_album, get_photos_upload_to_album
+    upload_photo_bytes, add_photos_to_album
 )
+from service.google_service import get_photos_upload_to_album
 from delete_photo import delete_all_photos_from_album
 from models.database import SessionLocal
 from dotenv import load_dotenv
@@ -12,17 +14,10 @@ import os
 import time
 import queue
 import threading
-import argparse
+import json
 
+app = Flask(__name__)
 load_dotenv()
-print("開始解析參數...")
-
-parser = argparse.ArgumentParser()
-parser.add_argument('--personID', help='指定要查詢的 Person ID')
-parser.add_argument('--albumID', help='指定要查詢的 Album ID')
-parser.add_argument('--albumName', type=str, help='指定要命名的 Album name')
-args = parser.parse_args()
-
 BASE_URL = os.getenv('SYNO_URL')
 ACCOUNT = os.getenv('SYNO_ACCOUNT')
 PASSWORD = os.getenv('SYNO_PASSWORD')
@@ -30,13 +25,8 @@ FID = os.getenv('SYNO_FID')
 TIMEZONE = os.getenv('SYNO_TIMEZONE')
 DOWNLOAD_DIR = os.getenv('SYNO_DOWNLOAD_DIR', '/app/downloaded_albums/')
 
-ALBUM_NAME = args.albumName
-PERSON_ID = args.personID
-ALBUM_ID = args.albumID
-
 NUM_DOWNLOAD_THREADS = 16
 NUM_UPLOAD_THREADS = 16
-UPLOAD_PHOTO_NUM = 10
 
 download_queue = queue.Queue()
 photo_queue = queue.Queue()
@@ -84,17 +74,18 @@ def upload_worker(creds,):
             end= time.time()
             print(f"🔼第 {x} 張， 上傳結束時間: {end:.2f}, 共耗時: {end-begin:.2f}")
         except Exception as e:
-            print(f"❌ 上傳錯誤: {filename} - {e}")
+            app.logger.info(f"❌ 上傳錯誤: {filename} - {e}")
         finally:
             photo_queue.task_done()
 
-def initialize_services():
+def initialize_creds():
     auth = login(ACCOUNT, PASSWORD, FID, TIMEZONE)
     creds = authenticate()
     return auth, creds
 
-def sync_all(auth):
-    random_photos = get_photos_upload_to_album(auth, PERSON_ID, ALBUM_ID, UPLOAD_PHOTO_NUM)
+def sync_all(auth, creds, person_id, album_id, num_photos, google_album_id):
+    token_map.clear()
+    random_photos = get_photos_upload_to_album(auth, person_id, album_id, num_photos)
     for photo in random_photos:
         download_queue.put(photo)
 
@@ -118,28 +109,61 @@ def sync_all(auth):
         t.join()
 
     add_photos_to_album(creds, google_album_id, token_map)
+    return {
+        "uploaded": len(token_map)
+    }
 
-if __name__ == "__main__":
+
+@app.route('/sync_photos', methods=['POST'])
+def sync_photos():
+    data = request.json
+
+    app.logger.info(f"Received data: {data}")
+    if not data:
+        return jsonify({"error": "請提供有效的 JSON 資料"}), 400
+    person_id = data.get("personID")
+    album_id = data.get("albumID")
+    album_name = data.get("albumName")
+    num_photos = data.get("numPhotos")
+
+    if not person_id and not album_id:
+        return jsonify({"error": "請提供 personID 或 albumID"}), 400
+
     try:
-        auth, creds = initialize_services()
-        service = get_service(creds)
-
         start_time = time.time()
-        google_album_id = get_or_create_album(service, album_name=ALBUM_NAME)
+        auth, creds = initialize_creds()
+        service = get_service(creds)
+        google_album_id = get_or_create_album(service, album_name=album_name)
+
+        people_list_path = os.path.join("/app/people_list", "people_list.json")
+        people_list = list_people(auth)
+
+        result_list = []
+        for i, person in enumerate(people_list):
+            if i == 8:
+                print("已獲取前 8 個人臉資料，停止獲取")
+                break
+
+            app.logger.error(person['name'])
+
+            result_list.append({
+                "name": person['name'],
+                "ID": person['id']
+            })
+        with open(people_list_path, "w", encoding="utf-8") as f:
+            json.dump(result_list, f, ensure_ascii=False, indent=2)
 
         delete_all_photos_from_album(google_album_id)
-        sync_all(auth)
+        result = sync_all(auth, creds, person_id, album_id, num_photos, google_album_id)
 
-        print("🔄 開始同步：從 Synology 下載並上傳至 Google Photos")
-        if PERSON_ID:
-            print(f"🔍 根據 Person ID = {PERSON_ID} 執行操作...")
-        elif ALBUM_ID:
-            print(f"📸 查詢 Album ID = {ALBUM_ID} 的相片列表...")
-        else:
-            print("⚠️ 請至少提供一個參數：--personID 或 --albumID")
-
-        print("✅ 同步完成")
-        print(f"⏱️ 總耗時: {time.time() - start_time:.2f} 秒")
-
+        return jsonify({
+            "message": "✅ 同步完成",
+            "uploaded_photos": result['uploaded'],
+            "time_spent": round(time.time() - start_time, 2)
+        })
     except Exception as e:
-        print("發生例外錯誤:", e)
+        app.logger.error(f"❌ 同步失敗: {e}")
+        return jsonify({"error": str(e)}), 500
+
+if __name__ == '__main__':
+    app.run(debug=True, host='0.0.0.0', port=5050)

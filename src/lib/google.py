@@ -6,11 +6,7 @@ from googleapiclient.discovery import build
 from google.auth.transport.requests import Request
 from google_auth_oauthlib.flow import InstalledAppFlow
 import json
-from lib.synlogy import (
-    randam_pick_from_album_database, randam_pick_from_person_database,
-    list_photos_by_person, list_all_photos_by_album, save_photos_to_db_with_album,
-    save_photos_to_db_with_person
-)
+
 SCOPES = [
     "https://www.googleapis.com/auth/photoslibrary",
     "https://www.googleapis.com/auth/photoslibrary.readonly",
@@ -57,22 +53,6 @@ def get_or_create_album(service, album_name="My New Album"):
     created_album = service.albums().create(body=new_album).execute()
     return created_album['id']
 
-def get_photos_upload_to_album(auth, person_ID, album_ID, upload_photo_num):
-    random_photos = []
-
-    if person_ID:
-        if len(random_photos) == 0:
-            person_photo_list = list_photos_by_person(auth=auth, person_id=person_ID)
-            save_photos_to_db_with_person(person_photo_list, person_ID)
-        random_photos = randam_pick_from_person_database(person_id=person_ID, limit=upload_photo_num)
-
-    elif album_ID:
-        if len(random_photos) == 0:
-            album_photo_list = list_all_photos_by_album(auth=auth, album_id=album_ID)
-            save_photos_to_db_with_album(album_photo_list, album_ID)
-        random_photos = randam_pick_from_album_database(album_id=album_ID, limit=upload_photo_num)
-
-    return random_photos
 
 def get_media_items_in_album(service, album_id):
     media_item_ids = []

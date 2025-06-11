@@ -4,3 +4,8 @@ client_secret.json
 token.pickle
 downloaded_albums
 pg_data
+face_image
+user_ids.txt
+people_list
+sessions
+app.logsrc/docker-python-google-photos.gz

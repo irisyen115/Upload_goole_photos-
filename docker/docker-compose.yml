@@ -2,16 +2,20 @@ version: "3.9"
 
 services:
   python-google-photos:
-    image: docker-python-google-photos
+    build:
+      context: ../configuration
+      dockerfile: Dockerfile
     container_name: google-photos
     volumes:
       - ../src:/app
-      - ../downloaded_albums:/app/downloaded_albums
+      - ../src/downloaded_albums:/app/downloaded_albums
+      - ../script:/app/script
+      - ../people_list:/app/people_list
     working_dir: /app
-    command: ["tail", "-F", "/dev/null"]
+    command: ["python", "app.py"]
     ports:
       - "5050:5050"
-  pgsql:
+  pgsql_photos:
     image: postgres
     container_name: pgsql_photos
     environment:
@@ -19,9 +23,15 @@ services:
       POSTGRES_PASSWORD: password
       POSTGRES_DB: photodatabase
     ports:
-      - "5433:5432"
+      - "5434:5432"
     volumes:
       - ../pg_data:/var/lib/postgresql/data
-
+  line-reply-service:
+    build:
+      context: ../line_reply_service
+    container_name: line-reply
+    volumes:
+      - ../line_reply_service:/app
+      - ../people_list:/app/people_list
 volumes:
   pg_data:

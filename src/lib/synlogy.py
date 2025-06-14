@@ -8,10 +8,12 @@ from models.album import Album
 from models.person import Person
 from sqlalchemy import func
 from dotenv import load_dotenv
-from models.database import SessionLocal
 from models.exist_album import ExistAlbum
 from models.exist_person import ExistPerson
 import urllib.parse
+import logging
+
+logging.basicConfig(filename="error.log", level=logging.ERROR, format="%(asctime)s - %(levelname)s - %(message)s")
 
 load_dotenv()
 
@@ -58,6 +60,7 @@ def login(account, password, fid, timezone):
         data['data']['synotoken'] = session.cookies.get('synotoken')
     sid = session.cookies.get("id") or session.cookies.get("_sid")
     data['data']['sid'] = sid
+    logging.error(f"Login successful, session ID: {sid}, SynoToken: {data['data']['synotoken']}")
     return data
 
 def get_album(auth, album_id):
@@ -76,17 +79,43 @@ def get_album(auth, album_id):
 
 def get_person(auth, person_id):
     token = auth['data']['synotoken']
-    url = f"{BASE_URL}/webapi/entry.cgi"
-    payload = {
+    logging.info(f"Fetching person with token: {token}")
+    logging.info(f"Fetching person with ID: {person_id}")
+
+    url = f"{BASE_URL}/webapi/entry.cgi/SYNO.Foto.Browse.Person"
+
+    headers = {
+        "accept": "*/*",
+        "accept-language": "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7,zh-CN;q=0.6",
+        "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
+        "origin": f"{BASE_URL}",
+        "referer": f"{BASE_URL}/?launchApp=SYNO.Foto.AppInstance",
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
+        "x-syno-token": token
+    }
+
+    # 注意 id 和 additional 要用字串形式的陣列格式
+    data = {
         "api": "SYNO.Foto.Browse.Person",
         "method": "get",
-        "version": "4",
-        "person_id": person_id,
+        "version": "1",
+        "id": f'[{person_id}]',                  # 字串格式的陣列，跟 curl 裡 %5B22492%5D 對應
         "additional": '["thumbnail"]'
     }
-    resp = session.post(url, headers=HEADERS, params={'SynoToken': token}, data=payload, verify=False)
+
+    # 這裡要帶上 cookie，token 可能不在 cookie 內，如果你有 cookie 也放這
+    cookies = auth.get('cookies', {})
+
+    resp = session.post(url, headers=headers, data=data, cookies=cookies, verify=False)
     resp.raise_for_status()
-    return resp.json()['data']
+    result = resp.json()
+
+    if not result.get('success'):
+        logging.error(f"Synology get_person API 回傳失敗: {result}")
+        return None
+
+    return result.get('data')
+
 
 def list_albums(auth):
     token = auth['data']['synotoken']
@@ -106,7 +135,7 @@ def list_albums(auth):
     resp.raise_for_status()
     return resp.json()
 
-def list_people(auth):
+def list_people(auth, limit):
     token = auth['data']['synotoken']
     url = f"{BASE_URL}/webapi/entry.cgi"
     payload = {
@@ -114,7 +143,7 @@ def list_people(auth):
         "method": "list",
         "version": "1",
         "offset": 0,
-        "limit": 100,
+        "limit": limit,
         "sort_by": "name",
         "sort_direction": "asc",
         "additional": '["thumbnail"]'
@@ -134,7 +163,6 @@ def list_photos_by_album(auth, album_id, offset=0, limit=100):
     url = f"{BASE_URL}/webapi/entry.cgi/SYNO.Foto.Browse.Item"
     headers = HEADERS.copy()
     headers['x-syno-token'] = token
-
     payload = {
         "api": "SYNO.Foto.Browse.Item",
         "method": "list",
@@ -168,6 +196,7 @@ def list_photos_by_person(auth, person_id, offset=0, limit=100):
     }
 
     resp = session.post(url, headers=headers, data=payload, verify=False)
+    logging.error(f"list_photos_by_person response: {resp.text}")
     resp.raise_for_status()
     return resp.json()['data']['list']
 
@@ -195,3 +224,12 @@ def download_photo(auth, item, save_path=None):
 
     with open(save_path, 'wb') as f:
         f.write(resp.content)
+
+def thumb_photo(id, cache_key, auth):
+    url = f'{BASE_URL}/synofoto/api/v2/p/Thumbnail/get?id={id}&cache_key="{cache_key}"&type="person"&SynoToken={auth["data"]["synotoken"]}'
+    response = session.get(url, verify=False)
+    response.raise_for_status()
+
+    with open(f"/app/face_image/{id}.jpg", "wb") as f:
+        f.write(response.content)
+

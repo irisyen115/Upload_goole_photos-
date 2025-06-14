@@ -1,0 +1,5 @@
+LINE_CHANNEL_ACCESS_TOKEN =
+LINE_PUSH_URL=https://api.line.me/v2/bot/message/push
+SQLALCHEMY_DATABASE_URI = 'postgresql://user:password@pgsql_container:5432/mydatabase'
+LINE_REPLY_URL = "https://api.line.me/v2/bot/message/reply"
+SERVER_URL =

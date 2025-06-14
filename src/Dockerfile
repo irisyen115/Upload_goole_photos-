@@ -7,3 +7,7 @@ RUN pip install -r requirements.txt
 RUN apt update ; apt install -y vim curl
 
 COPY . .
+
+ENV PYTHONPATH=/app
+
+CMD ["python", "app.py"]

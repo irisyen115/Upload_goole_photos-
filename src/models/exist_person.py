@@ -1,9 +1,10 @@
-from sqlalchemy import Column, Integer
+from sqlalchemy import Column, Integer, DateTime
 from sqlalchemy.orm import composite
 from models.database import Base
 from sqlalchemy.orm import relationship
 from sqlalchemy.ext.mutable import MutableComposite
 from sqlalchemy import UniqueConstraint
+from datetime import datetime
 
 class PersonPhotoPair:
     def __init__(self, person_id, photo_id):
@@ -31,6 +32,7 @@ class ExistPerson(Base):
     person_id = Column(Integer)
     photo_id = Column(Integer)
     person_photo_pair = composite(PersonPhotoPair, person_id, photo_id)
+    uploaded_at = Column(DateTime, default=datetime.utcnow)
 
     photos = relationship("Photo", back_populates="exit_person")
 

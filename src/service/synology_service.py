@@ -4,15 +4,14 @@ from models.album import Album
 from models.person import Person
 from models.exist_album import ExistAlbum
 from models.exist_person import ExistPerson
+from models.photo_blacklist import PhotoBlacklist
 from models.database import SessionLocal
 from datetime import datetime
 from sqlalchemy import func
-from dotenv import load_dotenv
+from config.config import Config
 import os
 
-load_dotenv()
-
-DOWNLOAD_DIR = os.getenv('SYNO_DOWNLOAD_DIR')
+DOWNLOAD_DIR = Config.SYNO_DOWNLOAD_DIR
 
 def list_all_photos_by_album(auth, album_id):
     all_photos = []
@@ -131,7 +130,7 @@ def save_photos_to_db_with_person(photo_list, person_id):
     else:
         print("⚠️ 沒有新照片需要儲存")
 
-def randam_pick_from_person_database(person_id=None, limit=30):
+def random_pick_from_person_database(person_id=None, limit=30):
     db = SessionLocal()
     if person_id:
         photos = (
@@ -161,17 +160,21 @@ def randam_pick_from_album_database(album_id=None, limit=30):
         photos = db.query(Photo).order_by(func.random()).limit(limit).all()
     return [{"filename": photo.filename, "id": photo.item_id} for photo in photos]
 
-def save_exit_db_with_person(photos, person_id):
+def save_exist_db_with_person(photos, person_id):
     db = SessionLocal()
+    blacklisted_ids = set(pid for (pid,) in db.query(PhotoBlacklist.photo_id).all())
+
     db.query(ExistPerson).delete()
+
     exit_person_entries = []
     for photo in photos:
+        if photo["id"] in blacklisted_ids:
+            continue
         ep = ExistPerson(person_id=person_id, photo_id=photo["id"])
         exit_person_entries.append(ep)
     db.bulk_save_objects(exit_person_entries)
     db.commit()
 
-    # ✅ 查詢剛剛存入的照片
     exit_photos = (
         db.query(Photo)
         .join(ExistPerson, ExistPerson.photo_id == Photo.item_id)

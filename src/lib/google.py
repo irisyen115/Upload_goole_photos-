@@ -4,16 +4,21 @@ import mimetypes
 import requests
 from googleapiclient.discovery import build
 from google.auth.transport.requests import Request
-from google_auth_oauthlib.flow import InstalledAppFlow
 import json
+from google_auth_oauthlib.flow import Flow
+from google_auth_oauthlib.flow import InstalledAppFlow
 
 SCOPES = [
-    "https://www.googleapis.com/auth/photoslibrary",
-    "https://www.googleapis.com/auth/photoslibrary.readonly",
-    "https://www.googleapis.com/auth/photoslibrary.appendonly",
     "https://www.googleapis.com/auth/photoslibrary.sharing",
-    "https://www.googleapis.com/auth/photoslibrary.readonly.appcreateddata",
     "https://www.googleapis.com/auth/photoslibrary.edit.appcreateddata",
+    "https://www.googleapis.com/auth/photoslibrary.appendonly",
+    "https://www.googleapis.com/auth/photoslibrary.readonly",
+    "https://www.googleapis.com/auth/photoslibrary",
+    "https://www.googleapis.com/auth/photoslibrary.readonly.appcreateddata",
+    "openid",
+    "https://www.googleapis.com/auth/userinfo.profile",
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/drive.metadata.readonly",
 ]
 
 API_BASE_URL = 'https://photoslibrary.googleapis.com/v1/'
@@ -34,12 +39,14 @@ def authenticate():
             creds.refresh(Request())
         else:
             flow = InstalledAppFlow.from_client_secrets_file("client_secret.json", SCOPES)
-            creds = flow.run_local_server(open_browser=False)
+            creds = flow.run_local_server(port=0, open_browser=False)
         with open("token.pickle", "wb") as tokenFile:
             pickle.dump(creds, tokenFile)
     return creds
 
 def get_service(creds):
+    if creds and creds.expired and creds.refresh_token:
+        creds.refresh(Request())
     return build('photoslibrary', 'v1', credentials=creds, static_discovery=False)
 
 def get_or_create_album(service, album_name="My New Album"):
@@ -53,6 +60,27 @@ def get_or_create_album(service, album_name="My New Album"):
     created_album = service.albums().create(body=new_album).execute()
     return created_album['id']
 
+def get_google_album_list(service, creds):
+    """列出使用者所有 Google Photos 相簿"""
+    service = get_service(creds)
+    albums = []
+    next_page_token = None
+
+    while True:
+        response = service.albums().list(
+            pageSize=50,
+            pageToken=next_page_token,
+            fields="albums(id,title),nextPageToken"
+        ).execute()
+
+        items = response.get("albums", [])
+        albums.extend(items)
+
+        next_page_token = response.get("nextPageToken")
+        if not next_page_token:
+            break
+
+    return albums
 
 def get_media_items_in_album(service, album_id):
     media_item_ids = []
@@ -74,6 +102,38 @@ def get_media_items_in_album(service, album_id):
             break
 
     return media_item_ids
+
+def list_media_items_in_album(service, album_id):
+    media_items = []
+    next_page_token = None
+
+    while True:
+        body = {"albumId": album_id}
+        if next_page_token:
+            body["pageToken"] = next_page_token
+
+        response = service.mediaItems().search(body=body).execute()
+
+        items = response.get("mediaItems", [])
+        media_items.extend(items)
+
+        next_page_token = response.get("nextPageToken")
+        if not next_page_token:
+            break
+
+    return media_items
+
+def find_media_item_ids_by_filenames(media_items, filenames):
+    filename_set = set(filenames)
+    found_ids = []
+
+    for item in media_items:
+        # 取 filename（有些在 mediaMetadata 裡，有些在外層）
+        fname = item.get("mediaMetadata", {}).get("filename") or item.get("filename")
+        if fname in filename_set:
+            found_ids.append(item["id"])
+
+    return found_ids
 
 def remove_all_items_from_album(service, album_id, media_item_ids):
     url = f"{API_BASE_URL}albums/{album_id}:batchRemoveMediaItems"
@@ -97,9 +157,9 @@ def remove_all_items_from_album(service, album_id, media_item_ids):
         )
 
         if response.status == 200:
-            print(f"成功移除第 {i // batch_size + 1} 批媒體項目")
+            print(f"成功移除媒體項目")
         else:
-            print(f"失敗（第 {i // batch_size + 1} 批）：", response.status, content.decode())
+            print(f"失敗：", response.status, content.decode())
             break
 
 def list_photos(service):
